@@ -9,12 +9,21 @@
 #include "freertos/task.h"
 #include "esp_vfs_fat.h"
 
+#include "lvgl.h"
+#include "esp_lvgl_port.h"
+
 extern const uint8_t gesture_jpg_start[] asm("_binary_gesture_jpg_start");
 extern const uint8_t gesture_jpg_end[] asm("_binary_gesture_jpg_end");
 const char *TAG = "hand_gesture_recognition";
 
 extern "C" esp_lcd_panel_handle_t disp_panel;
 extern "C" void board_init();
+
+static lv_obj_t *label_info;
+static lv_obj_t *label_camera;
+static lv_img_dsc_t img_dsc;
+
+
 void rgb565_to_rgb888(const uint16_t *src, uint8_t *dst, int w, int h) {
     int px_count = w * h;
     // 强制转换为 uint8_t 指针
@@ -75,13 +84,28 @@ extern "C" void app_main(void)
 
     board_init();
 
-    HandDetect *hand_detect = new HandDetect();
-    auto hand_gesture_recognizer = new HandGestureRecognizer(HandGestureCls::MOBILENETV2_0_5_S8_V1);
+    // HandDetect *hand_detect = new HandDetect();
+    // auto hand_gesture_recognizer = new HandGestureRecognizer(HandGestureCls::MOBILENETV2_0_5_S8_V1);
 
-    size_t img_size_rgb888 = 320 * 240 * 3; // RGB888
-    uint8_t *img_data_rgb888 = (uint8_t *)heap_caps_malloc(img_size_rgb888, MALLOC_CAP_8BIT);
-    if (img_data_rgb888 == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for RGB888 image");
+    // size_t img_size_rgb888 = 320 * 240 * 3; // RGB888
+    // uint8_t *img_data_rgb888 = (uint8_t *)heap_caps_malloc(img_size_rgb888, MALLOC_CAP_8BIT);
+    // if (img_data_rgb888 == NULL) {
+    //     ESP_LOGE(TAG, "Failed to allocate memory for RGB888 image");
+    //     return;
+    // }
+
+    memset(&img_dsc, 0, sizeof(lv_img_dsc_t));  // 清零结构体
+    lvgl_port_lock(0);
+
+    label_camera = lv_img_create(lv_scr_act());
+    lv_obj_align(label_camera, LV_ALIGN_CENTER, 0, 0);
+
+    lvgl_port_unlock();
+
+    size_t img_size_rgb565 = 320 * 240 * 2;
+    uint8_t *img_data_copy = (uint8_t *)heap_caps_malloc(img_size_rgb565, MALLOC_CAP_8BIT);
+    if (img_data_copy == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate persistent image buffer");
         return;
     }
 
@@ -93,10 +117,36 @@ extern "C" void app_main(void)
             continue;
         }
 
-        esp_lcd_panel_draw_bitmap(disp_panel, 0, 0, fb->width, fb->height, fb->buf);
+        if (fb->format != PIXFORMAT_RGB565 || fb->width != 320 || fb->height != 240) {
+            ESP_LOGE(TAG, "Unexpected frame size: %dx%d", fb->width, fb->height);
+            esp_camera_fb_return(fb);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        ESP_LOGI(TAG, "Camera frame received: %dx%d", fb->width, fb->height);
+
+        lv_memcpy(img_data_copy, fb->buf, img_size_rgb565);
+
+        img_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+        img_dsc.header.w = 240;
+        img_dsc.header.h = 320;
+        img_dsc.data = img_data_copy;
+        img_dsc.data_size = 320 * 240 * 2;
+        img_dsc.header.stride = 240;
+
+        lvgl_port_lock(0);
+        lv_obj_set_height(label_camera, 320);
+        lv_obj_set_width(label_camera, 240);
+        lv_img_set_src(label_camera, &img_dsc);
+        lv_obj_align(label_camera, LV_ALIGN_CENTER, 0, 0);
+        lvgl_port_unlock();
+
+
+        // esp_lcd_panel_draw_bitmap(disp_panel, 0, 0, fb->width, fb->height, fb->buf);
 
         // 转换为 RGB888
-        rgb565_to_rgb888((const uint16_t *)fb->buf, img_data_rgb888, fb->width, fb->height);
+        // rgb565_to_rgb888((const uint16_t *)fb->buf, img_data_rgb888, fb->width, fb->height);
 
         // dl::image::img_t img_rgb888 = {
         //     .data = img_data_rgb888,
@@ -119,31 +169,32 @@ extern "C" void app_main(void)
         // frame_count++;
 
         // 创建 dl::image::img_t 对象
-        dl::image::img_t img_rgb888 = {
-            .data = img_data_rgb888,
-            .width = (uint16_t)fb->width,
-            .height = (uint16_t)fb->height,
-            .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB888,
-        };
+        // dl::image::img_t img_rgb888 = {
+        //     .data = img_data_rgb888,
+        //     .width = (uint16_t)fb->width,
+        //     .height = (uint16_t)fb->height,
+        //     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB888,
+        // };
 
         // 进行手部检测和手势识别
-        auto hand_detect_results = hand_detect->run(img_rgb888);
-        if(!hand_detect_results.empty()) {
-            ESP_LOGI(TAG, "Detected %d hands", hand_detect_results.size());
-            std::vector<dl::cls::result_t> results = hand_gesture_recognizer->recognize(img_rgb888, hand_detect_results);
-            // 输出结果
-            for (const auto &res : results) {
-                ESP_LOGI(TAG, "category: %s, score: %f", res.cat_name, res.score);
-            }
-        } else {
-            ESP_LOGI(TAG, "No hands detected");
-        }
+        // auto hand_detect_results = hand_detect->run(img_rgb888);
+        // if(!hand_detect_results.empty()) {
+        //     ESP_LOGI(TAG, "Detected %d hands", hand_detect_results.size());
+        //     std::vector<dl::cls::result_t> results = hand_gesture_recognizer->recognize(img_rgb888, hand_detect_results);
+        //     // 输出结果
+        //     for (const auto &res : results) {
+        //         ESP_LOGI(TAG, "category: %s, score: %f", res.cat_name, res.score);
+        //     }
+        // } else {
+        //     ESP_LOGI(TAG, "No hands detected");
+        // }
+        // vTaskDelay(pdMS_TO_TICKS(5));
 
         esp_camera_fb_return(fb);
 
 
 
-        vTaskDelay(pdMS_TO_TICKS(1000)); // 每秒处理一帧
+        vTaskDelay(pdMS_TO_TICKS(33)); // 每秒处理一帧
     }
 
 #if CONFIG_HAND_DETECT_MODEL_IN_SDCARD || CONFIG_HAND_GESTURE_CLS_MODEL_IN_SDCARD

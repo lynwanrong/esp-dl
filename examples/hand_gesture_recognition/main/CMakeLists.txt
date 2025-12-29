@@ -3,6 +3,8 @@ set(src_dirs        ./)
 set(include_dirs    ./)
 
 set(requires    hand_gesture_recognition
+                fatfs
+                esp_psram
                 )
 
 if (IDF_TARGET STREQUAL "esp32s3")

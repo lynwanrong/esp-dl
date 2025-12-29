@@ -16,6 +16,10 @@
 
 #include "esp_camera.h"
 
+#include "esp_lvgl_port.h"
+#include "lvgl.h"
+#include "esp_psram.h"
+
 
 
 static camera_config_t camera_config = {
@@ -46,7 +50,7 @@ static camera_config_t camera_config = {
     .frame_size = FRAMESIZE_QVGA,    //QQVGA-UXGA, For ESP32, do not use sizes above QVGA when not JPEG. The performance of the ESP32-S series has improved a lot, but JPEG mode always gives better frame rates.
 
     .jpeg_quality = 12, //0-63, for OV series camera sensors, lower number means higher quality
-    .fb_count = 1,       //When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
+    .fb_count = 2,       //When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
     .fb_location = CAMERA_FB_IN_PSRAM,
     .grab_mode = CAMERA_GRAB_WHEN_EMPTY,
 };
@@ -65,7 +69,7 @@ esp_lcd_panel_handle_t disp_panel = NULL;
 i2c_master_bus_handle_t _i2c_bus = NULL;
 
 // @brief display&touch
-// static lv_display_t *disp = NULL;
+lv_display_t *disp = NULL;
 static void i2c_init(void)
 {
     // Initialize I2C peripheral
@@ -203,10 +207,61 @@ void display_init(void)
             ESP_ERROR_CHECK(__err);
         }
     }
+
+    ESP_LOGI(TAG, "Initialize LVGL library");
+    lv_init();
+
+#if CONFIG_SPIRAM
+    // lv image cache, currently only PNG is supported
+    size_t psram_size_mb = esp_psram_get_size() / 1024 / 1024;
+    if (psram_size_mb >= 8) {
+        lv_image_cache_resize(2 * 1024 * 1024, true);
+        ESP_LOGI(TAG, "Use 2MB of PSRAM for image cache");
+    } else if (psram_size_mb >= 2) {
+        lv_image_cache_resize(512 * 1024, true);
+        ESP_LOGI(TAG, "Use 512KB of PSRAM for image cache");
+    }
+#endif
+
+    ESP_LOGI(TAG, "Initialize LVGL port");
+    lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    port_cfg.task_priority = 1;
+#if CONFIG_SOC_CPU_CORES_NUM > 1
+    port_cfg.task_affinity = 1;
+#endif
+    lvgl_port_init(&port_cfg);
+
+    ESP_LOGI(TAG, "Adding LCD display");
+    const lvgl_port_display_cfg_t disp_cfg = {
+        .io_handle = io_handle,
+        .panel_handle = disp_panel,
+        .control_handle = NULL,
+        .buffer_size = DISPLAY_HEIGHT / 10 * DISPLAY_WIDTH, // Buffer for 10 lines
+        .double_buffer = 1,
+        .hres = (uint32_t)DISPLAY_WIDTH,
+        .vres = (uint32_t)DISPLAY_HEIGHT,
+        .monochrome = false,
+        /* Rotation values must be same as used in esp_lcd for initial settings of the screen */
+        .rotation = {
+            .swap_xy = 0,
+            .mirror_x = 0,
+            .mirror_y = 0,
+        },
+        .color_format = LV_COLOR_FORMAT_RGB565,
+        .flags = {
+            .buff_dma = 1,
+            .buff_spiram = 0,
+            .sw_rotate = 0,
+            .swap_bytes = 1,
+            .full_refresh = 0,
+            .direct_mode = 0,
+        }
+    };
+    disp = lvgl_port_add_disp(&disp_cfg);
     
 
     // disp = spi_lcd_display(io_handle, disp_panel,
-    //                        DISPLAY_WIDTH, DISPLAY_HEIGHT,
+    //                        DISPLAY_DISPLAY_WIDTH, DISPLAY_DISPLAY_HEIGHT,
     //                        DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
     //                        DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
     //                        DISPLAY_SWAP_XY);
@@ -249,29 +304,6 @@ void touch_init(void)
     ESP_LOGI(TAG, "Touch panel initialized successfully");
 }
 
-
-
-
-static void camera_stream_task(void *arg)
-{
-    ESP_LOGI(TAG, "Camera -> display task started");
-    while (1) {
-        camera_fb_t *fb = esp_camera_fb_get();
-        if (!fb) {
-            ESP_LOGE(TAG, "Camera capture failed");
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
-
-        if (fb->width == DISPLAY_WIDTH && fb->height == DISPLAY_HEIGHT && fb->format == PIXFORMAT_RGB565) {
-            // 直接绘制 RGB565 数据到面板
-            esp_lcd_panel_draw_bitmap(disp_panel, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, fb->buf);
-        }
-
-        esp_camera_fb_return(fb);
-        vTaskDelay(pdMS_TO_TICKS(33)); // 约 30 FPS 上限
-    }
-}
 
 
 void board_init(void)
