@@ -12,14 +12,12 @@
 
 #include "config.h"
 // #include "board.h"
-#include "esp_lcd_touch_gt911.h"
+// #include "esp_lcd_touch_gt911.h"
 
 #include "esp_camera.h"
 
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
-#include "esp_psram.h"
-
 
 
 static camera_config_t camera_config = {
@@ -271,38 +269,38 @@ void display_init(void)
     // }
 }
 
-void touch_init(void)
-{
-    const esp_lcd_touch_config_t tp_cfg = {
-        .x_max = DISPLAY_WIDTH,
-        .y_max = DISPLAY_HEIGHT,
-        .rst_gpio_num = GPIO_NUM_NC, // 不能使用TOUCH_RST_PIN，因为 复用上面手动复位
-        .int_gpio_num = TOUCH_INT_PIN,
-        .levels = {
-            .reset = 0,
-            .interrupt = 0,
-        },
-        .flags = {
-            .swap_xy = 0,
-            .mirror_x = 0,
-            .mirror_y = 0,
-        },
-    };
-    esp_lcd_touch_handle_t tp;
-    esp_lcd_panel_io_handle_t tp_io_handle = NULL;
-    esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-    tp_io_config.scl_speed_hz = 100000;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(_i2c_bus, &tp_io_config, &tp_io_handle));
-    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp));
-    assert(tp);
+// void touch_init(void)
+// {
+//     const esp_lcd_touch_config_t tp_cfg = {
+//         .x_max = DISPLAY_WIDTH,
+//         .y_max = DISPLAY_HEIGHT,
+//         .rst_gpio_num = GPIO_NUM_NC, // 不能使用TOUCH_RST_PIN，因为 复用上面手动复位
+//         .int_gpio_num = TOUCH_INT_PIN,
+//         .levels = {
+//             .reset = 0,
+//             .interrupt = 0,
+//         },
+//         .flags = {
+//             .swap_xy = 0,
+//             .mirror_x = 0,
+//             .mirror_y = 0,
+//         },
+//     };
+//     esp_lcd_touch_handle_t tp;
+//     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
+//     esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+//     tp_io_config.scl_speed_hz = 100000;
+//     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(_i2c_bus, &tp_io_config, &tp_io_handle));
+//     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp));
+//     assert(tp);
 
-    // const lvgl_port_touch_cfg_t touch_cfg = {
-    //     .disp = disp,
-    //     .handle = tp,
-    // };
-    // lvgl_port_add_touch(&touch_cfg);
-    ESP_LOGI(TAG, "Touch panel initialized successfully");
-}
+//     // const lvgl_port_touch_cfg_t touch_cfg = {
+//     //     .disp = disp,
+//     //     .handle = tp,
+//     // };
+//     // lvgl_port_add_touch(&touch_cfg);
+//     ESP_LOGI(TAG, "Touch panel initialized successfully");
+// }
 
 
 

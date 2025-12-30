@@ -10,6 +10,7 @@
 #include "esp_vfs_fat.h"
 
 #include "lvgl.h"
+#include "lv_demos.h"
 #include "esp_lvgl_port.h"
 
 extern const uint8_t gesture_jpg_start[] asm("_binary_gesture_jpg_start");
@@ -23,6 +24,9 @@ static lv_obj_t *label_info;
 static lv_obj_t *label_camera;
 static lv_img_dsc_t img_dsc;
 
+static lv_obj_t *canvas;
+
+
 
 void rgb565_to_rgb888(const uint16_t *src, uint8_t *dst, int w, int h) {
     int px_count = w * h;
@@ -34,7 +38,8 @@ void rgb565_to_rgb888(const uint16_t *src, uint8_t *dst, int w, int h) {
         // 计算“倒序”的索引：
         // 当 i = 0 (目标图左上角) 时，读取 src 的最后一个像素
         // 从而实现 180 度旋转
-        int src_idx = px_count - 1 - i;
+        // int src_idx = px_count - 1 - i;
+        int src_idx = i;
         // ===========================================
 
         // 注意：虽然像素顺序倒了，但单个像素内部的高低字节序(HB/LB)不能乱，
@@ -84,21 +89,39 @@ extern "C" void app_main(void)
 
     board_init();
 
-    // HandDetect *hand_detect = new HandDetect();
-    // auto hand_gesture_recognizer = new HandGestureRecognizer(HandGestureCls::MOBILENETV2_0_5_S8_V1);
+    // lvgl_port_lock(0);
+    // lv_demo_widgets();
+    // lvgl_port_unlock();
 
-    // size_t img_size_rgb888 = 320 * 240 * 3; // RGB888
-    // uint8_t *img_data_rgb888 = (uint8_t *)heap_caps_malloc(img_size_rgb888, MALLOC_CAP_8BIT);
-    // if (img_data_rgb888 == NULL) {
-    //     ESP_LOGE(TAG, "Failed to allocate memory for RGB888 image");
-    //     return;
-    // }
+    HandDetect *hand_detect = new HandDetect();
+    auto hand_gesture_recognizer = new HandGestureRecognizer(HandGestureCls::MOBILENETV2_0_5_S8_V1);
 
-    memset(&img_dsc, 0, sizeof(lv_img_dsc_t));  // 清零结构体
+    size_t img_size_rgb888 = 320 * 240 * 3; // RGB888
+    uint8_t *img_data_rgb888 = (uint8_t *)heap_caps_malloc(img_size_rgb888, MALLOC_CAP_8BIT);
+    if (img_data_rgb888 == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for RGB888 image");
+        return;
+    }
+#if 1
+
     lvgl_port_lock(0);
 
-    label_camera = lv_img_create(lv_scr_act());
-    lv_obj_align(label_camera, LV_ALIGN_CENTER, 0, 0);
+    canvas = lv_canvas_create(lv_scr_act());
+    uint8_t *canvas_data = (uint8_t *)heap_caps_malloc(320 * 240 * 2, MALLOC_CAP_8BIT);
+    lv_canvas_set_buffer(canvas, canvas_data, 320, 240, LV_COLOR_FORMAT_RGB565);
+
+    // label_camera = lv_img_create(lv_scr_act());
+    // lv_obj_set_height(label_camera, 240);
+    // lv_obj_set_width(label_camera, 320);
+    // lv_obj_set_align(label_camera, LV_ALIGN_CENTER);
+    // // lv_obj_align(label_camera, LV_ALIGN_CENTER, 0, 0);
+
+    label_info = lv_label_create(lv_scr_act());
+    lv_obj_align(label_info, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_text_align(label_info, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_bg_opa(label_info, LV_OPA_0, 0);
+    lv_obj_set_style_text_color(label_info, lv_color_hex(0xF80000), 0);
+    lv_obj_set_style_transform_scale(label_info, 512, 0);
 
     lvgl_port_unlock();
 
@@ -109,6 +132,7 @@ extern "C" void app_main(void)
         return;
     }
 
+
     while (true) { 
         camera_fb_t *fb = esp_camera_fb_get();
         if (!fb) {
@@ -116,44 +140,40 @@ extern "C" void app_main(void)
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
-
-        if (fb->format != PIXFORMAT_RGB565 || fb->width != 320 || fb->height != 240) {
-            ESP_LOGE(TAG, "Unexpected frame size: %dx%d", fb->width, fb->height);
-            esp_camera_fb_return(fb);
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
+        lv_memcpy(canvas_data, fb->buf, img_size_rgb565);
+        // lv_memcpy(img_data_copy, fb->buf, img_size_rgb565);
+        uint32_t *ptr = (uint32_t *)canvas_data;
+        uint32_t temp;
+        size_t count = img_size_rgb565 / 4;
+        for (size_t i = 0; i < count; i++) {
+            temp = ptr[i];
+            ptr[i] = ((temp & 0x00FF00FF) << 8) | ((temp & 0xFF00FF00) >> 8);
         }
 
-        ESP_LOGI(TAG, "Camera frame received: %dx%d", fb->width, fb->height);
-
-        lv_memcpy(img_data_copy, fb->buf, img_size_rgb565);
-
-        img_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-        img_dsc.header.w = 240;
-        img_dsc.header.h = 320;
-        img_dsc.data = img_data_copy;
-        img_dsc.data_size = 320 * 240 * 2;
-        img_dsc.header.stride = 240;
+        // img_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+        // img_dsc.header.w = 320;
+        // img_dsc.header.h = 240;
+        // img_dsc.data = img_data_copy;
+        // img_dsc.data_size = 320 * 240 * 2;
+        // img_dsc.header.stride = 320 * 2;
 
         lvgl_port_lock(0);
-        lv_obj_set_height(label_camera, 320);
-        lv_obj_set_width(label_camera, 240);
-        lv_img_set_src(label_camera, &img_dsc);
-        lv_obj_align(label_camera, LV_ALIGN_CENTER, 0, 0);
+        // lv_img_set_src(label_camera, &img_dsc);
+        lv_obj_invalidate(canvas);
         lvgl_port_unlock();
 
 
         // esp_lcd_panel_draw_bitmap(disp_panel, 0, 0, fb->width, fb->height, fb->buf);
 
         // 转换为 RGB888
-        // rgb565_to_rgb888((const uint16_t *)fb->buf, img_data_rgb888, fb->width, fb->height);
+        rgb565_to_rgb888((const uint16_t *)fb->buf, img_data_rgb888, fb->width, fb->height);
 
-        // dl::image::img_t img_rgb888 = {
-        //     .data = img_data_rgb888,
-        //     .width = (uint16_t)fb->width,
-        //     .height = (uint16_t)fb->height,
-        //     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB888,
-        // };
+        dl::image::img_t img_rgb888 = {
+            .data = img_data_rgb888,
+            .width = (uint16_t)fb->width,
+            .height = (uint16_t)fb->height,
+            .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB888,
+        };
 
         // static int frame_count = 0;
         // if (frame_count <= 10) {
@@ -177,26 +197,24 @@ extern "C" void app_main(void)
         // };
 
         // 进行手部检测和手势识别
-        // auto hand_detect_results = hand_detect->run(img_rgb888);
-        // if(!hand_detect_results.empty()) {
-        //     ESP_LOGI(TAG, "Detected %d hands", hand_detect_results.size());
-        //     std::vector<dl::cls::result_t> results = hand_gesture_recognizer->recognize(img_rgb888, hand_detect_results);
-        //     // 输出结果
-        //     for (const auto &res : results) {
-        //         ESP_LOGI(TAG, "category: %s, score: %f", res.cat_name, res.score);
-        //     }
-        // } else {
-        //     ESP_LOGI(TAG, "No hands detected");
-        // }
-        // vTaskDelay(pdMS_TO_TICKS(5));
+        auto hand_detect_results = hand_detect->run(img_rgb888);
+        if (!hand_detect_results.empty()) {
+            // ESP_LOGI(TAG, "Detected %d hands", hand_detect_results.size());
+            std::vector<dl::cls::result_t> results = hand_gesture_recognizer->recognize(img_rgb888, hand_detect_results);
+            // 输出结果
+            for (const auto &res : results) {
+                lvgl_port_lock(0);
+                lv_label_set_text_fmt(label_info, "%s", res.cat_name);
+                lvgl_port_unlock();
+                // ESP_LOGI(TAG, "category: %s, score: %f", res.cat_name, res.score);
 
+            }
+        }
         esp_camera_fb_return(fb);
-
-
 
         vTaskDelay(pdMS_TO_TICKS(33)); // 每秒处理一帧
     }
-
+#endif
 #if CONFIG_HAND_DETECT_MODEL_IN_SDCARD || CONFIG_HAND_GESTURE_CLS_MODEL_IN_SDCARD
     ESP_ERROR_CHECK(bsp_sdcard_unmount());
 #endif
